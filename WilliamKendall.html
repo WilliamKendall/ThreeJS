@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>William Kendall - Project 3</title>
+<script type="text/javascript" src="three.js"/></script>
+<script type='text/javascript' src="dat.gui.min.js"></script>
+
+</head>
+
+<style>
+body { margin: 0; }
+#canvasGL{
+background-color: pink,
+width: 100%,
+height: 100%}
+</style>
+
+
+
+
+<body>
+<canvas id="canvasGL" ></canvas>
+
+
+<script type="text/javascript" >
+/*
+William Kendall
+CMSC 405
+Project 3 - 'Kendall Land'
+
+Program loads JSON blender models the show a car moving around kendall land.
+The speed and day light and camera angle are user changable.
+
+*/
+//basic web stuff
+window.addEventListener( 'resize', onWindowResize, false );
+
+function onWindowResize(){
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize( window.innerWidth, window.innerHeight );
+
+}
+
+//three stuff
+
+
+//globals
+var canvas;
+var scene, camera, renderer;
+var clock = new THREE.Clock;
+var gui;
+
+
+//objects
+var car;
+
+//follow cam
+var oldCameraPos;
+
+//driving car
+var oldCarPos;
+var carAlpha=0;
+
+
+//path for car
+var carPoint=0;
+var carPath;
+var curve = new THREE.CatmullRomCurve3( [
+	new THREE.Vector3( 0, 1, 0 ),		//center
+	new THREE.Vector3( 0, 1, -6 ),	//rear, center
+	new THREE.Vector3( -6, 1, -6 ),  //rear, left
+	new THREE.Vector3( -6, 1, 6 ),	//front, left
+	new THREE.Vector3( 0, 1, 6 ),		//front, center
+	new THREE.Vector3( 0, 1, 0 ),		//center
+	new THREE.Vector3( 0, 1, -6 ),	//rear, center
+	new THREE.Vector3( -6, 1, -6 ),  //rear, left
+	new THREE.Vector3( -6, 1, 6 ),	//front, left
+	new THREE.Vector3( 0, 1, 6 ),		//front, center
+	new THREE.Vector3( 6, 1, 6 ),		//front, right
+	new THREE.Vector3( 6, 1, -6 ),	//rear, right
+	new THREE.Vector3( -6, 1, -6 ),  //rear, left
+	new THREE.Vector3( -6, 1, 6 ),	//front, left
+	new THREE.Vector3( 0, 1, 6 ),		//front, center
+	new THREE.Vector3( 0, 1, 0 ),		//center
+
+] );
+
+
+
+//menu stuff
+var guiParams =  {
+	cameraFollow: false,
+	cameraLook: false,
+    carSpeed: 20,
+    lightsOut: false
+};
+
+//lights
+var lightAm;
+var lightPo;
+var lightHs;
+var headLight;
+
+//start scene
+init();
+animate();
+
+
+//first call, setup three
+function init()
+{
+
+	try
+	{
+	   canvas = document.getElementById("canvasGL");
+		renderer = new THREE.WebGLRenderer( {
+		    canvas: canvas,
+		    antialias: true
+		} );
+	}
+	catch (e)
+	{
+		document.getElementById("canvas-holder").innerHTML =
+		         "<h1>Could not setup Three.js<h1>";
+		return;
+	}
+	
+	sceneSetup();
+	console.log("setup finsihed");
+}
+
+//setup the scene
+function sceneSetup()
+{
+	renderer.setClearColor(0xFFFFFF);
+	renderer.setSize(window.innerWidth,window.innerHeight);
+	renderer.clippingPlanes = Object.freeze( [] );
+	renderer.localClippingEnabled = true;
+	renderer.shadowMapEnabled = true;
+	//V-FOV, aspect, near, far
+	camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight,0.1, 1000);
+	camera.position.set( 0, 3, 20 );
+	camera.lookAt(new THREE.Vector3(0,0,0));
+
+	scene = new THREE.Scene();
+	
+	//lights
+	lightAm = new THREE.AmbientLight(0xFFFFFF,.3);
+	lightAm.position.set(0,3,3);
+	scene.add(lightAm);
+	lightPo = new THREE.PointLight(0xFFFFFF, .8);
+	lightPo.position.set(0,3,3);
+	scene.add(lightPo);
+	
+	//hemisphere light
+	lightHs = new THREE.HemisphereLight( 0xffffbb, 0x000000, 1 );
+	scene.add( lightHs );
+	
+	//car light
+	headLight = new THREE.SpotLight( 0xffffff );
+	headLight.castShadow = true;
+	headLight.shadowDarkness = 0.6;
+	headLight.angle=0.50;
+	headLight.intensity = 0;
+
+
+	//load ground
+	loadObject('ground.json', function(object) {
+	scene.add(object);
+	object.position.set(0,0,0);
+}); //a-sync
+
+
+//load tower
+	loadObject('watertower.json', function(object) {
+	scene.add(object);
+	object.position.set(0,0,0);
+}); //a-sync
+
+
+//load monkey
+	loadObject('monkey.json', function(object) {
+	scene.add(object);
+	object.position.set(0,0,0);
+}); //a-sync
+
+//load car
+	loadObject('car.json', function(object) {
+	scene.add(object);
+	object.position.set(0,0,0);
+	car = object;
+	car.castShadow = false;
+	car.add(headLight);
+	car.add(headLight.target);
+	headLight.target.position.set(0,.5,-2);
+	headLight.position.set( 0, .5, -.2 );
+}); //a-sync
+
+//load cone
+	var geometry = new THREE.ConeGeometry( 1, 2, 32 );
+	var material = new THREE.MeshPhongMaterial( {color: 0xffff00} );
+	var cone = new THREE.Mesh( geometry, material );
+	cone.position.set(5,1,5);
+	scene.add( cone );
+
+//load torus
+	var localPlane = new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0.0 );
+	geometry = new THREE.TorusGeometry( 2, .2, 32,32 );
+	material = new THREE.MeshPhongMaterial( {color: 0x0000ff,
+		clippingPlanes: [ localPlane ]
+		} );
+	var torus = new THREE.Mesh( geometry, material );
+	torus.position.set(-6,0,5);
+	scene.add( torus );
+
+//build car path
+carPath = new THREE.Geometry();
+carPath.vertices = curve.getPoints( 400 );//400 points should be smooth, maybe?
+material = new THREE.LineBasicMaterial( { color : 0xff0000 } );
+oldCarPos =new THREE.Vector3(0,0,0);
+oldCameraPos =new THREE.Vector3(0,0,0);
+
+// Create the final object to add to the scene
+var curveObject = new THREE.Line(carPath, material )
+
+scene.add(curveObject);
+
+
+
+//create gui
+gui = new dat.GUI();
+
+gui.add(guiParams, 'cameraFollow').name("Follow Car");
+gui.add(guiParams, 'cameraLook').name("Watch Car");
+gui.add(guiParams, 'carSpeed', 0, 40).name("Car Speed");
+
+gui.add(guiParams, 'lightsOut').name("Night Time").onFinishChange(function(){
+//gui changed the lights
+	if(guiParams.lightsOut)
+	{
+		renderer.setClearColor(0x00000F);
+		lightAm.intensity = .01;
+		lightPo.intensity = 0.0;
+		lightHs.intensity = 0.1;
+		headLight.intensity = 1.0;
+	}
+	else {
+		renderer.setClearColor(0xFFFFFF);
+		lightAm.intensity = .3;
+		lightPo.intensity = 0.8;
+		lightHs.intensity = 1;
+		headLight.intensity = 0.0;
+	}
+});
+
+
+}//end sceneSetup
+
+
+
+function loadObject(json, callback)
+{
+	var object;
+	//JSON Loader   
+	var loader = new THREE.JSONLoader();
+	loader.setTexturePath( './' );
+	loader.load(json, function (geometry, materials) 
+	{
+		object = new THREE.Mesh(geometry,materials);	
+		callback(object);	
+	});
+}//end loadObject
+
+
+//javascript math fail
+// https://stackoverflow.com/questions/4467539/
+function mod(n, m) {
+        return ((n % m) + m) % m;
+}
+
+function animate()
+{
+var delta = clock.getDelta();
+
+	if(car)
+	{		
+		carAlpha += delta*guiParams.carSpeed;
+		
+		//lerp the car
+		car.position.lerpVectors(oldCarPos, carPath.vertices[carPoint] ,carAlpha);	
+		
+		
+		if(guiParams.cameraFollow)
+		{
+		//lerp the camera
+		var cameraPoint = parseInt(mod(carPoint-20,  400));	
+		camera.position.lerpVectors(oldCameraPos, carPath.vertices[cameraPoint] ,carAlpha);
+		}
+		else {
+			camera.position.set(0,3,20);
+		}
+		//update car and camera		
+		if(carAlpha >= 1) 
+		{
+			carPoint++;
+			oldCameraPos = camera.position.clone();
+			oldCarPos = car.position.clone();
+			if(carPoint > 400)
+			{
+				carPoint=1; //the last point and first are the same
+			}			
+			carAlpha=0;
+		}
+	
+	//car, look at where you are going
+	car.lookAt(carPath.vertices[carPoint]);	
+	//car, why you drive backwards?
+	car.rotation.y += Math.PI;
+	//car, stay on the ground
+	car.position.y-=1;
+
+
+	
+	//camera, look at the car
+	if(guiParams.cameraLook)
+	{
+		camera.lookAt(car.position);
+	}
+	else {
+		camera.lookAt(new THREE.Vector3(0,1,0));
+	}
+	
+
+	}
+	
+	renderer.render( scene, camera );
+	requestAnimationFrame( animate );
+	
+}//end animate
+
+</script>
+
+
+
+
+</body>
+
+
+</html>
